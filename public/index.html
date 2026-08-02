@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Grid Tactics</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="game-container">
+        <h1>Grid Tactics</h1>
+        
+        <div id="status">Connecting to server...</div>
+        
+        <div class="score-board">
+            <div id="p1-card" class="player-card">
+                P1 (Red)
+                <div id="p1-timer" class="timer">5s</div>
+                <div>Points: <span id="p1-score">0</span>/3</div>
+            </div>
+            <div id="p2-card" class="player-card">
+                P2 (Blue)
+                <div id="p2-timer" class="timer">5s</div>
+                <div>Points: <span id="p2-score">0</span>/3</div>
+            </div>
+        </div>
+
+        <div id="board" class="board"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
