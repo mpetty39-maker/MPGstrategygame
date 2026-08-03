@@ -13,8 +13,6 @@ let waitingPlayer = null;
 let rooms = {};
 let roomIdCounter = 1;
 
-// Board setup: Player 1 (top, index 0) vs Player 2 (bottom, index 6)
-// Size: 'S' (Small), 'M' (Medium), 'L' (Large)
 function createInitialBoard() {
     let board = Array(7).fill(null).map(() => Array(7).fill(null));
     
@@ -130,11 +128,10 @@ function handleMove(room, playerNum, from, to) {
 
     if (!isValidMove(room.board, from, to, piece)) return;
 
-    // Reset inactivity timer for the player making the move
+    // Reset inactivity timer for the player who made the move
     resetTimer(room, playerNum);
 
-    // Perform capture / movement logic
-    const target = room.board[to.r][to.c];
+    // Perform movement/capture logic
     room.board[from.r][from.c] = null;
     room.board[to.r][to.c] = piece;
 
@@ -156,7 +153,7 @@ function handleMove(room, playerNum, from, to) {
     const opponentBackRow = playerNum === 1 ? 6 : 0;
     if (to.r === opponentBackRow && !piece.locked) {
         piece.locked = true;
-        piece.freeze = 0; // Locked pieces don't need freeze indicators
+        piece.freeze = 0;
         room.scores[playerNum] += 1;
     }
 
@@ -175,7 +172,6 @@ function handleMove(room, playerNum, from, to) {
         return;
     }
 
-    // Check if opponent can move or if all their pieces are frozen/captured
     const oppNum = playerNum === 1 ? 2 : 1;
     if (!hasLegalMoves(room.board, oppNum)) {
         endGame(room, playerNum, `Player ${oppNum} has no legal moves available!`);
@@ -189,28 +185,25 @@ function sizeRank(size) {
 
 function isValidMove(board, from, to, piece) {
     const target = board[to.r][to.c];
-    if (target && target.locked) return false; // Locked spaces cannot be captured
+    if (target && target.locked) return false;
     if (target && target.owner === piece.owner) return false;
-    if (target && sizeRank(piece.size) < sizeRank(target.size)) return false; // Cannot capture larger piece
+    if (target && sizeRank(piece.size) < sizeRank(target.size)) return false;
 
     const dr = to.r - from.r;
     const dc = to.c - from.c;
     const absR = Math.abs(dr);
     const absC = Math.abs(dc);
 
-    // Direction must be straight or diagonal line
     const stepR = dr === 0 ? 0 : dr / absR;
     const stepC = dc === 0 ? 0 : dc / absC;
 
     if (dr !== 0 && dc !== 0 && absR !== absC) return false;
 
-    // Small and Medium move max 2 spaces; Large moves 1 space
     const maxDist = (piece.size === 'S' || piece.size === 'M') ? 2 : 1;
     const dist = Math.max(absR, absC);
 
     if (dist < 1 || dist > maxDist) return false;
 
-    // Path obstruction checking (cannot pass through any piece)
     let currR = from.r + stepR;
     let currC = from.c + stepC;
     while (currR !== to.r || currC !== to.c) {
@@ -230,7 +223,6 @@ function hasLegalMoves(board, playerNum) {
             if (p && p.owner === playerNum && !p.locked) {
                 hasPieces = true;
                 if (p.freeze === 0) {
-                    // Check if at least one valid destination exists
                     for (let tr = 0; tr < 7; tr++) {
                         for (let tc = 0; tc < 7; tc++) {
                             if (isValidMove(board, { r, c }, { r: tr, c: tc }, p)) return true;
@@ -245,7 +237,7 @@ function hasLegalMoves(board, playerNum) {
 
 function resetTimer(room, playerNum) {
     if (playerNum === 1) {
-        clearInterval(room.p1Timer);
+        if (room.p1Timer) clearInterval(room.p1Timer);
         room.p1TimeLeft = 5;
         broadcast(room, { type: 'TIMER_UPDATE', player: 1, time: 5 });
         room.p1Timer = setInterval(() => {
@@ -256,7 +248,7 @@ function resetTimer(room, playerNum) {
             }
         }, 1000);
     } else {
-        clearInterval(room.p2Timer);
+        if (room.p2Timer) clearInterval(room.p2Timer);
         room.p2TimeLeft = 5;
         broadcast(room, { type: 'TIMER_UPDATE', player: 2, time: 5 });
         room.p2Timer = setInterval(() => {
@@ -270,8 +262,8 @@ function resetTimer(room, playerNum) {
 }
 
 function stopTimers(room) {
-    clearInterval(room.p1Timer);
-    clearInterval(room.p2Timer);
+    if (room.p1Timer) clearInterval(room.p1Timer);
+    if (room.p2Timer) clearInterval(room.p2Timer);
 }
 
 function endGame(room, winner, reason) {
