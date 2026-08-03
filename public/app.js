@@ -3,6 +3,7 @@ let myPlayerNum = null;
 let currentBoard = [];
 let selectedCell = null;
 let validMoves = [];
+let isAnimating = false;
 
 const statusEl = document.getElementById('status');
 const boardEl = document.getElementById('board');
@@ -29,12 +30,7 @@ function connect() {
                 renderBoard();
                 break;
             case 'MOVE_MADE':
-                currentBoard = msg.board;
-                p1ScoreEl.innerText = msg.scores[1];
-                p2ScoreEl.innerText = msg.scores[2];
-                selectedCell = null;
-                validMoves = [];
-                renderBoard();
+                animateAndApplyMove(msg);
                 break;
             case 'TIMER_UPDATE':
                 if (msg.player === 1) p1TimerEl.innerText = `${msg.time}s`;
@@ -47,23 +43,28 @@ function connect() {
     };
 }
 
+// Convert screen grid coords (r, c) to backend array coords (actualR, actualC)
+// Both players will have their pieces starting at the bottom row (rendered r = 6)
+function getActualCoords(r, c) {
+    if (myPlayerNum === 1) {
+        return { actualR: 6 - r, actualC: 6 - c };
+    } else {
+        return { actualR: r, actualC: c };
+    }
+}
+
 function renderBoard() {
     boardEl.innerHTML = '';
 
-    // Orient board perspective so player is always on the bottom
-    const isP2 = myPlayerNum === 2;
-
     for (let r = 0; r < 7; r++) {
         for (let c = 0; c < 7; c++) {
-            const actualR = isP2 ? 6 - r : r;
-            const actualC = isP2 ? 6 - c : c;
+            const { actualR, actualC } = getActualCoords(r, c);
 
             const cell = document.createElement('div');
             cell.className = 'cell';
             cell.dataset.r = actualR;
             cell.dataset.c = actualC;
 
-            // Highlight valid movement targets
             if (validMoves.some(m => m.r === actualR && m.c === actualC)) {
                 cell.classList.add('valid-move');
             }
@@ -96,7 +97,44 @@ function renderBoard() {
     }
 }
 
+function animateAndApplyMove(msg) {
+    const fromCell = document.querySelector(`.cell[data-r="${msg.from.r}"][data-c="${msg.from.c}"]`);
+    const toCell = document.querySelector(`.cell[data-r="${msg.to.r}"][data-c="${msg.to.c}"]`);
+    const pieceEl = fromCell ? fromCell.querySelector('.piece') : null;
+
+    if (pieceEl && toCell) {
+        isAnimating = true;
+        const fromRect = fromCell.getBoundingClientRect();
+        const toRect = toCell.getBoundingClientRect();
+
+        const deltaX = toRect.left - fromRect.left;
+        const deltaY = toRect.top - fromRect.top;
+
+        pieceEl.classList.add('sliding');
+        pieceEl.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+
+        setTimeout(() => {
+            currentBoard = msg.board;
+            p1ScoreEl.innerText = msg.scores[1];
+            p2ScoreEl.innerText = msg.scores[2];
+            selectedCell = null;
+            validMoves = [];
+            isAnimating = false;
+            renderBoard();
+        }, 280);
+    } else {
+        currentBoard = msg.board;
+        p1ScoreEl.innerText = msg.scores[1];
+        p2ScoreEl.innerText = msg.scores[2];
+        selectedCell = null;
+        validMoves = [];
+        renderBoard();
+    }
+}
+
 function handleCellClick(r, c) {
+    if (isAnimating) return;
+
     const piece = currentBoard[r][c];
 
     // Select piece
@@ -149,7 +187,8 @@ function isValidMoveLocal(board, from, to, piece) {
 
     if (dr !== 0 && dc !== 0 && absR !== absC) return false;
 
-    const maxDist = piece.size === 'S' ? 3 : (piece.size === 'M' ? 2 : 1);
+    // Small and Medium move max 2 spaces; Large moves 1 space
+    const maxDist = (piece.size === 'S' || piece.size === 'M') ? 2 : 1;
     const dist = Math.max(absR, absC);
 
     if (dist < 1 || dist > maxDist) return false;
