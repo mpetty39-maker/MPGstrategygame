@@ -204,7 +204,8 @@ function isValidMove(board, from, to, piece) {
 
     if (dr !== 0 && dc !== 0 && absR !== absC) return false;
 
-    const maxDist = piece.size === 'S' ? 3 : (piece.size === 'M' ? 2 : 1);
+    // Small and Medium move max 2 spaces; Large moves 1 space
+    const maxDist = (piece.size === 'S' || piece.size === 'M') ? 2 : 1;
     const dist = Math.max(absR, absC);
 
     if (dist < 1 || dist > maxDist) return false;
