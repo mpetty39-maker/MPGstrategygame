@@ -8,7 +8,6 @@ const statusElement = document.getElementById('status');
 const timerElement = document.getElementById('timer');
 const scoreElement = document.getElementById('score');
 
-// Connect WebSocket
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 socket = new WebSocket(`${protocol}//${window.location.host}`);
 
@@ -24,19 +23,23 @@ socket.onmessage = (event) => {
             myPlayerNum = data.player;
             currentBoard = data.board;
             statusElement.innerText = `Game Started! You are Player ${myPlayerNum} (${myPlayerNum === 1 ? 'Red' : 'Blue'})`;
+            
+            // Orient board so the current player's pieces are always at the bottom
+            if (myPlayerNum === 2) {
+                boardElement.classList.add('flipped');
+            } else {
+                boardElement.classList.remove('flipped');
+            }
             renderBoard();
             break;
 
         case 'MOVE_MADE':
-            currentBoard = data.board;
-            selectedCell = null; // Clear selection after any move to prevent stale taps
-            updateScores(data.scores);
-            renderBoard();
+            animateAndSyncMove(data.from, data.to, data.board, data.scores);
             break;
 
         case 'TIMER_UPDATE':
             if (data.player === myPlayerNum) {
-                timerElement.innerText = `Your Move Time: ${data.time}s`;
+                timerElement.innerText = `Move Timer: ${data.time}s`;
             }
             break;
 
@@ -51,6 +54,37 @@ socket.onmessage = (event) => {
     }
 };
 
+function animateAndSyncMove(from, to, newBoard, scores) {
+    const fromCell = document.querySelector(`.cell[data-row="${from.r}"][data-col="${from.c}"]`);
+    const toCell = document.querySelector(`.cell[data-row="${to.r}"][data-col="${to.c}"]`);
+
+    if (fromCell && toCell && fromCell.firstElementChild) {
+        const pieceElem = fromCell.firstElementChild;
+        const fromRect = fromCell.getBoundingClientRect();
+        const toRect = toCell.getBoundingClientRect();
+
+        const deltaX = toRect.left - fromRect.left;
+        const deltaY = toRect.top - fromRect.top;
+
+        // Perform visual slide animation
+        pieceElem.style.transition = 'transform 0.2s cubic-bezier(0.25, 1, 0.5, 1)';
+        pieceElem.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+        pieceElem.style.zIndex = '100';
+
+        setTimeout(() => {
+            currentBoard = newBoard;
+            selectedCell = null;
+            if (scores) updateScores(scores);
+            renderBoard();
+        }, 200);
+    } else {
+        currentBoard = newBoard;
+        selectedCell = null;
+        if (scores) updateScores(scores);
+        renderBoard();
+    }
+}
+
 function renderBoard() {
     if (!currentBoard) return;
     boardElement.innerHTML = '';
@@ -62,7 +96,6 @@ function renderBoard() {
             cell.dataset.row = r;
             cell.dataset.col = c;
 
-            // Highlight selected cell
             if (selectedCell && selectedCell.r === r && selectedCell.c === c) {
                 cell.classList.add('selected');
             }
@@ -86,7 +119,6 @@ function renderBoard() {
                 cell.appendChild(pieceDiv);
             }
 
-            // Highlighting valid move destinations for selected piece
             if (selectedCell && isValidMoveDestination(selectedCell, { r, c })) {
                 cell.classList.add('valid-target');
             }
@@ -100,9 +132,8 @@ function renderBoard() {
 function handleCellClick(r, c) {
     const clickedPiece = currentBoard[r][c];
 
-    // Case 1: Tapping your own unfrozen, unlocked piece -> SELECT IT
+    // Select your own active piece
     if (clickedPiece && clickedPiece.owner === myPlayerNum && clickedPiece.freeze === 0 && !clickedPiece.locked) {
-        // Tapping the already selected piece deselects it
         if (selectedCell && selectedCell.r === r && selectedCell.c === c) {
             selectedCell = null;
         } else {
@@ -112,19 +143,17 @@ function handleCellClick(r, c) {
         return;
     }
 
-    // Case 2: Tapping a destination while a piece is selected -> TRY MOVE
+    // Move to target square
     if (selectedCell) {
         const from = selectedCell;
         const to = { r, c };
 
-        // Send move request to server
         socket.send(JSON.stringify({
             type: 'MOVE',
             from: from,
             to: to
         }));
 
-        // Instantly clear selection to prevent rapid duplicate sends
         selectedCell = null;
         renderBoard();
     }
@@ -138,8 +167,7 @@ function isValidMoveDestination(from, to) {
     const target = currentBoard[to.r][to.c];
     if (target && target.locked) return false;
     if (target && target.owner === piece.owner) return false;
-    
-    // Size check
+
     const sizeRank = { 'S': 1, 'M': 2, 'L': 3 };
     if (target && sizeRank[piece.size] < sizeRank(target.size)) return false;
 
@@ -155,7 +183,6 @@ function isValidMoveDestination(from, to) {
 
     if (dist < 1 || dist > maxDist) return false;
 
-    // Path check
     const stepR = dr === 0 ? 0 : dr / absR;
     const stepC = dc === 0 ? 0 : dc / absC;
     let currR = from.r + stepR;

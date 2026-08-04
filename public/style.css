@@ -59,7 +59,7 @@ body {
     color: #ffffff;
 }
 
-/* 7x7 Grid Board Setup */
+/* 7x7 Grid Board */
 #board {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
@@ -72,6 +72,12 @@ body {
     gap: 2px;
     padding: 2px;
     box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5);
+    transition: transform 0.3s ease;
+}
+
+/* Rotates board so Player 2 always plays from bottom to top */
+#board.flipped {
+    transform: rotate(180deg);
 }
 
 .cell {
@@ -86,12 +92,10 @@ body {
     -webkit-tap-highlight-color: transparent;
 }
 
-/* Alternating cell color grid pattern */
 .cell:nth-child(even) {
     background-color: #2e2e2e;
 }
 
-/* Selected cell highlight */
 .cell.selected {
     outline: 3px solid #ffea00;
     outline-offset: -3px;
@@ -99,7 +103,6 @@ body {
     z-index: 2;
 }
 
-/* Valid target destination dot indicator */
 .cell.valid-target::after {
     content: '';
     position: absolute;
@@ -115,7 +118,7 @@ body {
     z-index: 3;
 }
 
-/* Piece Base Styling */
+/* Pieces */
 .piece {
     border-radius: 50%;
     display: flex;
@@ -125,11 +128,15 @@ body {
     color: #ffffff;
     position: relative;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4);
-    transition: transform 0.1s ease;
-    pointer-events: none; /* Crucial so clicks pass directly to the .cell container */
+    pointer-events: none;
+    will-change: transform;
 }
 
-/* Player Colors */
+/* Keeps piece text upright if board is flipped */
+#board.flipped .piece {
+    transform: rotate(180deg);
+}
+
 .piece.p1 {
     background: radial-gradient(circle at 30% 30%, #ff5252, #b71c1c);
     border: 2px solid #ff8a80;
@@ -140,7 +147,6 @@ body {
     border: 2px solid #82b1ff;
 }
 
-/* Relative Piece Sizes */
 .piece.s {
     width: 55%;
     height: 55%;
@@ -159,13 +165,12 @@ body {
     font-size: 1.25rem;
 }
 
-/* Locked Piece (Reached back row) */
 .piece.locked {
     border: 3px solid #ffd700;
     box-shadow: 0 0 10px #ffd700;
 }
 
-/* Frozen Overlay Styling */
+/* Freeze Overlay */
 .freeze-overlay {
     position: absolute;
     top: 0;
@@ -173,9 +178,7 @@ body {
     width: 100%;
     height: 100%;
     border-radius: 50%;
-    /* Semi-transparent wash keeps team color (Red/Blue) completely visible */
     background: rgba(0, 0, 0, 0.35);
-    /* Cyan ice accent border and glow */
     border: 2px solid #00e5ff;
     box-shadow: inset 0 0 6px #00e5ff, 0 0 6px rgba(0, 229, 255, 0.6);
     box-sizing: border-box;
@@ -189,7 +192,6 @@ body {
     text-shadow: 0 0 4px #000;
 }
 
-/* Prevent text selection or touch interference across all piece children */
 .piece *, .cell * {
     pointer-events: none;
 }
