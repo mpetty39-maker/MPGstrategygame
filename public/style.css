@@ -72,12 +72,6 @@ body {
     gap: 2px;
     padding: 2px;
     box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5);
-    transition: transform 0.3s ease;
-}
-
-/* Rotates board so Player 2 always plays from bottom to top */
-#board.flipped {
-    transform: rotate(180deg);
 }
 
 .cell {
@@ -130,11 +124,6 @@ body {
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4);
     pointer-events: none;
     will-change: transform;
-}
-
-/* Keeps piece text upright if board is flipped */
-#board.flipped .piece {
-    transform: rotate(180deg);
 }
 
 .piece.p1 {

@@ -12,45 +12,42 @@ const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 socket = new WebSocket(`${protocol}//${window.location.host}`);
 
 socket.onmessage = (event) => {
-    const data = JSON.parse(event.data);
+    try {
+        const data = JSON.parse(event.data);
 
-    switch (data.type) {
-        case 'WAITING':
-            statusElement.innerText = data.message;
-            break;
+        switch (data.type) {
+            case 'WAITING':
+                statusElement.innerText = data.message;
+                break;
 
-        case 'START':
-            myPlayerNum = data.player;
-            currentBoard = data.board;
-            statusElement.innerText = `Game Started! You are Player ${myPlayerNum} (${myPlayerNum === 1 ? 'Red' : 'Blue'})`;
-            
-            // Orient board so the current player's pieces are always at the bottom
-            if (myPlayerNum === 2) {
-                boardElement.classList.add('flipped');
-            } else {
-                boardElement.classList.remove('flipped');
-            }
-            renderBoard();
-            break;
+            case 'START':
+                myPlayerNum = data.player;
+                currentBoard = data.board;
+                statusElement.innerText = `Game Started! You are Player ${myPlayerNum} (${myPlayerNum === 1 ? 'Red' : 'Blue'})`;
+                renderBoard();
+                break;
 
-        case 'MOVE_MADE':
-            animateAndSyncMove(data.from, data.to, data.board, data.scores);
-            break;
+            case 'MOVE_MADE':
+                animateAndSyncMove(data.from, data.to, data.board, data.scores);
+                break;
 
-        case 'TIMER_UPDATE':
-            if (data.player === myPlayerNum) {
-                timerElement.innerText = `Move Timer: ${data.time}s`;
-            }
-            break;
+            case 'TIMER_UPDATE':
+                if (data.player === myPlayerNum) {
+                    timerElement.innerText = `Move Timer: ${data.time}s`;
+                }
+                break;
 
-        case 'GAMEOVER':
-            statusElement.innerText = `GAME OVER: ${data.reason}`;
-            if (data.winner === myPlayerNum) {
-                statusElement.innerText += " YOU WIN!";
-            } else {
-                statusElement.innerText += " YOU LOSE!";
-            }
-            break;
+            case 'GAMEOVER':
+                statusElement.innerText = `GAME OVER: ${data.reason}`;
+                if (data.winner === myPlayerNum) {
+                    statusElement.innerText += " YOU WIN!";
+                } else {
+                    statusElement.innerText += " YOU LOSE!";
+                }
+                break;
+        }
+    } catch (e) {
+        console.error("Error processing socket message:", e);
     }
 };
 
@@ -66,8 +63,8 @@ function animateAndSyncMove(from, to, newBoard, scores) {
         const deltaX = toRect.left - fromRect.left;
         const deltaY = toRect.top - fromRect.top;
 
-        // Perform visual slide animation
-        pieceElem.style.transition = 'transform 0.2s cubic-bezier(0.25, 1, 0.5, 1)';
+        // Perform standard screen-space slide animation
+        pieceElem.style.transition = 'transform 0.2s ease-out';
         pieceElem.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
         pieceElem.style.zIndex = '100';
 
@@ -89,8 +86,13 @@ function renderBoard() {
     if (!currentBoard) return;
     boardElement.innerHTML = '';
 
-    for (let r = 0; r < 7; r++) {
-        for (let c = 0; c < 7; c++) {
+    for (let displayR = 0; displayR < 7; displayR++) {
+        for (let displayC = 0; displayC < 7; displayC++) {
+            // Map screen position to logical board row/col
+            // Player 2 sees row 6 at the bottom (displayR = 6 maps to board row 6)
+            const r = myPlayerNum === 2 ? (6 - displayR) : displayR;
+            const c = myPlayerNum === 2 ? (6 - displayC) : displayC;
+
             const cell = document.createElement('div');
             cell.classList.add('cell');
             cell.dataset.row = r;
@@ -100,7 +102,7 @@ function renderBoard() {
                 cell.classList.add('selected');
             }
 
-            const piece = currentBoard[r][c];
+            const piece = currentBoard[r] ? currentBoard[r][c] : null;
             if (piece) {
                 const pieceDiv = document.createElement('div');
                 pieceDiv.classList.add('piece', `p${piece.owner}`, piece.size.toLowerCase());
@@ -130,9 +132,10 @@ function renderBoard() {
 }
 
 function handleCellClick(r, c) {
-    const clickedPiece = currentBoard[r][c];
+    if (!currentBoard) return;
+    const clickedPiece = currentBoard[r] ? currentBoard[r][c] : null;
 
-    // Select your own active piece
+    // Select active piece belonging to current player
     if (clickedPiece && clickedPiece.owner === myPlayerNum && clickedPiece.freeze === 0 && !clickedPiece.locked) {
         if (selectedCell && selectedCell.r === r && selectedCell.c === c) {
             selectedCell = null;
@@ -143,7 +146,7 @@ function handleCellClick(r, c) {
         return;
     }
 
-    // Move to target square
+    // Try to move selected piece to clicked square
     if (selectedCell) {
         const from = selectedCell;
         const to = { r, c };
@@ -160,11 +163,11 @@ function handleCellClick(r, c) {
 }
 
 function isValidMoveDestination(from, to) {
-    if (!currentBoard) return false;
-    const piece = currentBoard[from.r][from.c];
+    if (!currentBoard || !from || !to) return false;
+    const piece = currentBoard[from.r] ? currentBoard[from.r][from.c] : null;
     if (!piece || piece.owner !== myPlayerNum || piece.freeze > 0 || piece.locked) return false;
 
-    const target = currentBoard[to.r][to.c];
+    const target = currentBoard[to.r] ? currentBoard[to.r][to.c] : null;
     if (target && target.locked) return false;
     if (target && target.owner === piece.owner) return false;
 
@@ -178,7 +181,8 @@ function isValidMoveDestination(from, to) {
 
     if (dr !== 0 && dc !== 0 && absR !== absC) return false;
 
-    const maxDist = (piece.size === 'S' || piece.size === 'M') ? 2 : 1;
+    // Small = max 3, Medium = max 2, Large = max 1
+    const maxDist = piece.size === 'S' ? 3 : (piece.size === 'M' ? 2 : 1);
     const dist = Math.max(absR, absC);
 
     if (dist < 1 || dist > maxDist) return false;
@@ -187,8 +191,9 @@ function isValidMoveDestination(from, to) {
     const stepC = dc === 0 ? 0 : dc / absC;
     let currR = from.r + stepR;
     let currC = from.c + stepC;
+
     while (currR !== to.r || currC !== to.c) {
-        if (currentBoard[currR][currC] !== null) return false;
+        if (currentBoard[currR] && currentBoard[currR][currC] !== null) return false;
         currR += stepR;
         currC += stepC;
     }
@@ -197,5 +202,7 @@ function isValidMoveDestination(from, to) {
 }
 
 function updateScores(scores) {
-    scoreElement.innerText = `Player 1: ${scores[1]} | Player 2: ${scores[2]}`;
+    if (scores && scoreElement) {
+        scoreElement.innerText = `Player 1: ${scores[1]} | Player 2: ${scores[2]}`;
+    }
 }
