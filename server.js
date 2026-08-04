@@ -81,8 +81,8 @@ wss.on('connection', (ws) => {
             scores: { 1: 0, 2: 0 },
             p1Timer: null,
             p2Timer: null,
-            p1TimeLeft: 5,
-            p2TimeLeft: 5,
+            p1TimeLeft: 10,
+            p2TimeLeft: 10,
             gameStarted: true,
             gameOver: false
         };
@@ -238,8 +238,8 @@ function hasLegalMoves(board, playerNum) {
 function resetTimer(room, playerNum) {
     if (playerNum === 1) {
         if (room.p1Timer) clearInterval(room.p1Timer);
-        room.p1TimeLeft = 5;
-        broadcast(room, { type: 'TIMER_UPDATE', player: 1, time: 5 });
+        room.p1TimeLeft = 10;
+        broadcast(room, { type: 'TIMER_UPDATE', player: 1, time: 10 });
         room.p1Timer = setInterval(() => {
             room.p1TimeLeft--;
             broadcast(room, { type: 'TIMER_UPDATE', player: 1, time: room.p1TimeLeft });
@@ -249,8 +249,8 @@ function resetTimer(room, playerNum) {
         }, 1000);
     } else {
         if (room.p2Timer) clearInterval(room.p2Timer);
-        room.p2TimeLeft = 5;
-        broadcast(room, { type: 'TIMER_UPDATE', player: 2, time: 5 });
+        room.p2TimeLeft = 10;
+        broadcast(room, { type: 'TIMER_UPDATE', player: 2, time: 10 });
         room.p2Timer = setInterval(() => {
             room.p2TimeLeft--;
             broadcast(room, { type: 'TIMER_UPDATE', player: 2, time: room.p2TimeLeft });
