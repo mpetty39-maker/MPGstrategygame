@@ -1,110 +1,171 @@
-body {
-    background-color: #1a1a1a;
-    color: #fff;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    min-height: 100vh;
+* {
+    box-sizing: border-box;
     margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
-.game-container {
+body {
+    background-color: #121212;
+    color: #ffffff;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 12px;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 10px;
+}
+
+#game-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    max-width: 500px;
+}
+
+#header {
+    text-align: center;
+    margin-bottom: 15px;
+    width: 100%;
 }
 
 #status {
-    font-size: 1.2rem;
-    color: #ffca28;
-    min-height: 1.5em;
-    text-align: center;
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #4da6ff;
+    min-height: 28px;
 }
 
-.score-board {
+#info-bar {
     display: flex;
-    gap: 40px;
-}
-
-.player-card {
-    padding: 10px 20px;
-    background: #2a2a2a;
+    justify-content: space-between;
+    width: 100%;
+    background-color: #1e1e1e;
+    padding: 10px 15px;
     border-radius: 8px;
-    text-align: center;
-    border: 2px solid transparent;
-}
-
-.timer {
-    font-size: 1.4rem;
+    margin-bottom: 15px;
+    font-size: 0.95rem;
     font-weight: bold;
-    color: #ff5252;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
 }
 
-.board {
+#timer {
+    color: #ffcc00;
+}
+
+#score {
+    color: #ffffff;
+}
+
+/* 7x7 Grid Board Setup */
+#board {
     display: grid;
-    grid-template-columns: repeat(7, 60px);
-    grid-template-rows: repeat(7, 60px);
-    gap: 4px;
-    background-color: #333;
-    padding: 8px;
+    grid-template-columns: repeat(7, 1fr);
+    grid-template-rows: repeat(7, 1fr);
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    background-color: #2a2a2a;
+    border: 3px solid #444;
     border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-    position: relative;
+    gap: 2px;
+    padding: 2px;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5);
 }
 
 .cell {
-    width: 60px;
-    height: 60px;
-    background-color: #444;
+    background-color: #383838;
     border-radius: 4px;
     display: flex;
     justify-content: center;
     align-items: center;
     position: relative;
     cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
-.cell.valid-move {
-    background-color: #2e7d32;
-    box-shadow: inset 0 0 8px #81c784;
+/* Alternating cell color grid pattern */
+.cell:nth-child(even) {
+    background-color: #2e2e2e;
 }
 
+/* Selected cell highlight */
+.cell.selected {
+    outline: 3px solid #ffea00;
+    outline-offset: -3px;
+    background-color: rgba(255, 234, 0, 0.25) !important;
+    z-index: 2;
+}
+
+/* Valid target destination dot indicator */
+.cell.valid-target::after {
+    content: '';
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    background-color: rgba(0, 255, 0, 0.7);
+    box-shadow: 0 0 8px rgba(0, 255, 0, 0.8);
+    border-radius: 50%;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 3;
+}
+
+/* Piece Base Styling */
 .piece {
     border-radius: 50%;
     display: flex;
     justify-content: center;
     align-items: center;
-    font-weight: bold;
-    user-select: none;
-    position: absolute;
-    z-index: 2;
-    will-change: transform;
+    font-weight: 800;
+    color: #ffffff;
+    position: relative;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4);
+    transition: transform 0.1s ease;
+    pointer-events: none; /* Crucial so clicks pass directly to the .cell container */
 }
 
-.piece.sliding {
-    transition: transform 0.28s cubic-bezier(0.25, 1, 0.5, 1);
-    z-index: 10;
+/* Player Colors */
+.piece.p1 {
+    background: radial-gradient(circle at 30% 30%, #ff5252, #b71c1c);
+    border: 2px solid #ff8a80;
 }
 
-.piece.p1 { background-color: #e53935; color: white; }
-.piece.p2 { background-color: #1e88e5; color: white; }
-
-.piece.size-S { width: 30px; height: 30px; font-size: 12px; }
-.piece.size-M { width: 42px; height: 42px; font-size: 16px; }
-.piece.size-L { width: 52px; height: 52px; font-size: 20px; }
-
-.piece.selected {
-    outline: 3px solid #ffeb3b;
-    transform: scale(1.1);
+.piece.p2 {
+    background: radial-gradient(circle at 30% 30%, #448aff, #0d47a1);
+    border: 2px solid #82b1ff;
 }
 
+/* Relative Piece Sizes */
+.piece.s {
+    width: 55%;
+    height: 55%;
+    font-size: 0.85rem;
+}
+
+.piece.m {
+    width: 72%;
+    height: 72%;
+    font-size: 1.05rem;
+}
+
+.piece.l {
+    width: 88%;
+    height: 88%;
+    font-size: 1.25rem;
+}
+
+/* Locked Piece (Reached back row) */
 .piece.locked {
     border: 3px solid #ffd700;
     box-shadow: 0 0 10px #ffd700;
 }
 
+/* Frozen Overlay Styling */
 .freeze-overlay {
     position: absolute;
     top: 0;
@@ -112,9 +173,9 @@ body {
     width: 100%;
     height: 100%;
     border-radius: 50%;
-    /* Semi-transparent dark wash so team color (Red/Blue) shows through */
-    background: rgba(0, 0, 0, 0.35); 
-    /* Cyan ice accent border to make the freeze state obvious */
+    /* Semi-transparent wash keeps team color (Red/Blue) completely visible */
+    background: rgba(0, 0, 0, 0.35);
+    /* Cyan ice accent border and glow */
     border: 2px solid #00e5ff;
     box-shadow: inset 0 0 6px #00e5ff, 0 0 6px rgba(0, 229, 255, 0.6);
     box-sizing: border-box;
@@ -126,4 +187,9 @@ body {
     align-items: center;
     pointer-events: none;
     text-shadow: 0 0 4px #000;
+}
+
+/* Prevent text selection or touch interference across all piece children */
+.piece *, .cell * {
+    pointer-events: none;
 }

@@ -1,202 +1,167 @@
-let ws;
+let socket;
 let myPlayerNum = null;
-let currentBoard = [];
 let selectedCell = null;
-let validMoves = [];
-let isAnimating = false;
+let currentBoard = null;
 
-const statusEl = document.getElementById('status');
-const boardEl = document.getElementById('board');
-const p1TimerEl = document.getElementById('p1-timer');
-const p2TimerEl = document.getElementById('p2-timer');
-const p1ScoreEl = document.getElementById('p1-score');
-const p2ScoreEl = document.getElementById('p2-score');
+const boardElement = document.getElementById('board');
+const statusElement = document.getElementById('status');
+const timerElement = document.getElementById('timer');
+const scoreElement = document.getElementById('score');
 
-function connect() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${protocol}//${window.location.host}`);
+// Connect WebSocket
+const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+socket = new WebSocket(`${protocol}//${window.location.host}`);
 
-    ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
+socket.onmessage = (event) => {
+    const data = JSON.parse(event.data);
 
-        switch (msg.type) {
-            case 'WAITING':
-                statusEl.innerText = msg.message;
-                break;
-            case 'START':
-                myPlayerNum = msg.player;
-                currentBoard = msg.board;
-                statusEl.innerText = `Game Started! You are Player ${myPlayerNum} (${myPlayerNum === 1 ? 'Red' : 'Blue'})`;
-                renderBoard();
-                break;
-            case 'MOVE_MADE':
-                animateAndApplyMove(msg);
-                break;
-            case 'TIMER_UPDATE':
-                if (msg.player === 1) p1TimerEl.innerText = `${msg.time}s`;
-                if (msg.player === 2) p2TimerEl.innerText = `${msg.time}s`;
-                break;
-            case 'GAMEOVER':
-                statusEl.innerText = `GAME OVER: ${msg.reason} ${msg.winner === myPlayerNum ? 'You Win! 🎉' : 'You Lost! ❌'}`;
-                break;
-        }
-    };
-}
+    switch (data.type) {
+        case 'WAITING':
+            statusElement.innerText = data.message;
+            break;
 
-// Convert screen grid coords (r, c) to backend array coords (actualR, actualC)
-// Both players will have their pieces starting at the bottom row (rendered r = 6)
-function getActualCoords(r, c) {
-    if (myPlayerNum === 1) {
-        return { actualR: 6 - r, actualC: 6 - c };
-    } else {
-        return { actualR: r, actualC: c };
+        case 'START':
+            myPlayerNum = data.player;
+            currentBoard = data.board;
+            statusElement.innerText = `Game Started! You are Player ${myPlayerNum} (${myPlayerNum === 1 ? 'Red' : 'Blue'})`;
+            renderBoard();
+            break;
+
+        case 'MOVE_MADE':
+            currentBoard = data.board;
+            selectedCell = null; // Clear selection after any move to prevent stale taps
+            updateScores(data.scores);
+            renderBoard();
+            break;
+
+        case 'TIMER_UPDATE':
+            if (data.player === myPlayerNum) {
+                timerElement.innerText = `Your Move Time: ${data.time}s`;
+            }
+            break;
+
+        case 'GAMEOVER':
+            statusElement.innerText = `GAME OVER: ${data.reason}`;
+            if (data.winner === myPlayerNum) {
+                statusElement.innerText += " YOU WIN!";
+            } else {
+                statusElement.innerText += " YOU LOSE!";
+            }
+            break;
     }
-}
+};
 
 function renderBoard() {
-    boardEl.innerHTML = '';
+    if (!currentBoard) return;
+    boardElement.innerHTML = '';
 
     for (let r = 0; r < 7; r++) {
         for (let c = 0; c < 7; c++) {
-            const { actualR, actualC } = getActualCoords(r, c);
-
             const cell = document.createElement('div');
-            cell.className = 'cell';
-            cell.dataset.r = actualR;
-            cell.dataset.c = actualC;
+            cell.classList.add('cell');
+            cell.dataset.row = r;
+            cell.dataset.col = c;
 
-            if (validMoves.some(m => m.r === actualR && m.c === actualC)) {
-                cell.classList.add('valid-move');
+            // Highlight selected cell
+            if (selectedCell && selectedCell.r === r && selectedCell.c === c) {
+                cell.classList.add('selected');
             }
 
-            const piece = currentBoard[actualR][actualC];
+            const piece = currentBoard[r][c];
             if (piece) {
-                const pieceEl = document.createElement('div');
-                pieceEl.className = `piece p${piece.owner} size-${piece.size}`;
-                pieceEl.innerText = piece.size;
+                const pieceDiv = document.createElement('div');
+                pieceDiv.classList.add('piece', `p${piece.owner}`, piece.size.toLowerCase());
+                pieceDiv.innerText = piece.size;
 
-                if (piece.locked) pieceEl.classList.add('locked');
-
-                if (selectedCell && selectedCell.r === actualR && selectedCell.c === actualC) {
-                    pieceEl.classList.add('selected');
+                if (piece.locked) {
+                    pieceDiv.classList.add('locked');
+                } else if (piece.freeze > 0) {
+                    pieceDiv.classList.add('frozen');
+                    const overlay = document.createElement('div');
+                    overlay.classList.add('freeze-overlay');
+                    overlay.innerText = piece.freeze;
+                    pieceDiv.appendChild(overlay);
                 }
 
-                if (piece.freeze > 0) {
-                    const freezeOverlay = document.createElement('div');
-                    freezeOverlay.className = 'freeze-overlay';
-                    freezeOverlay.innerText = piece.freeze;
-                    pieceEl.appendChild(freezeOverlay);
-                }
-
-                cell.appendChild(pieceEl);
+                cell.appendChild(pieceDiv);
             }
 
-            cell.addEventListener('click', () => handleCellClick(actualR, actualC));
-            boardEl.appendChild(cell);
+            // Highlighting valid move destinations for selected piece
+            if (selectedCell && isValidMoveDestination(selectedCell, { r, c })) {
+                cell.classList.add('valid-target');
+            }
+
+            cell.addEventListener('click', () => handleCellClick(r, c));
+            boardElement.appendChild(cell);
         }
-    }
-}
-
-function animateAndApplyMove(msg) {
-    const fromCell = document.querySelector(`.cell[data-r="${msg.from.r}"][data-c="${msg.from.c}"]`);
-    const toCell = document.querySelector(`.cell[data-r="${msg.to.r}"][data-c="${msg.to.c}"]`);
-    const pieceEl = fromCell ? fromCell.querySelector('.piece') : null;
-
-    if (pieceEl && toCell) {
-        isAnimating = true;
-        const fromRect = fromCell.getBoundingClientRect();
-        const toRect = toCell.getBoundingClientRect();
-
-        const deltaX = toRect.left - fromRect.left;
-        const deltaY = toRect.top - fromRect.top;
-
-        pieceEl.classList.add('sliding');
-        pieceEl.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
-
-        setTimeout(() => {
-            currentBoard = msg.board;
-            p1ScoreEl.innerText = msg.scores[1];
-            p2ScoreEl.innerText = msg.scores[2];
-            selectedCell = null;
-            validMoves = [];
-            isAnimating = false;
-            renderBoard();
-        }, 280);
-    } else {
-        currentBoard = msg.board;
-        p1ScoreEl.innerText = msg.scores[1];
-        p2ScoreEl.innerText = msg.scores[2];
-        selectedCell = null;
-        validMoves = [];
-        renderBoard();
     }
 }
 
 function handleCellClick(r, c) {
-    if (isAnimating) return;
+    const clickedPiece = currentBoard[r][c];
 
-    const piece = currentBoard[r][c];
-
-    // Select piece
-    if (piece && piece.owner === myPlayerNum && piece.freeze === 0 && !piece.locked) {
-        selectedCell = { r, c };
-        calculateValidMoves(r, c, piece);
+    // Case 1: Tapping your own unfrozen, unlocked piece -> SELECT IT
+    if (clickedPiece && clickedPiece.owner === myPlayerNum && clickedPiece.freeze === 0 && !clickedPiece.locked) {
+        // Tapping the already selected piece deselects it
+        if (selectedCell && selectedCell.r === r && selectedCell.c === c) {
+            selectedCell = null;
+        } else {
+            selectedCell = { r, c };
+        }
         renderBoard();
         return;
     }
 
-    // Execute Move
-    if (selectedCell && validMoves.some(m => m.r === r && m.c === c)) {
-        ws.send(JSON.stringify({
+    // Case 2: Tapping a destination while a piece is selected -> TRY MOVE
+    if (selectedCell) {
+        const from = selectedCell;
+        const to = { r, c };
+
+        // Send move request to server
+        socket.send(JSON.stringify({
             type: 'MOVE',
-            from: selectedCell,
-            to: { r, c }
+            from: from,
+            to: to
         }));
+
+        // Instantly clear selection to prevent rapid duplicate sends
         selectedCell = null;
-        validMoves = [];
         renderBoard();
     }
 }
 
-function calculateValidMoves(fromR, fromC, piece) {
-    validMoves = [];
-    for (let tr = 0; tr < 7; tr++) {
-        for (let tc = 0; tc < 7; tc++) {
-            if (isValidMoveLocal(currentBoard, { r: fromR, c: fromC }, { r: tr, c: tc }, piece)) {
-                validMoves.push({ r: tr, c: tc });
-            }
-        }
-    }
-}
+function isValidMoveDestination(from, to) {
+    if (!currentBoard) return false;
+    const piece = currentBoard[from.r][from.c];
+    if (!piece || piece.owner !== myPlayerNum || piece.freeze > 0 || piece.locked) return false;
 
-function isValidMoveLocal(board, from, to, piece) {
-    const target = board[to.r][to.c];
+    const target = currentBoard[to.r][to.c];
     if (target && target.locked) return false;
     if (target && target.owner === piece.owner) return false;
     
+    // Size check
     const sizeRank = { 'S': 1, 'M': 2, 'L': 3 };
-    if (target && sizeRank[piece.size] < sizeRank[target.size]) return false;
+    if (target && sizeRank[piece.size] < sizeRank(target.size)) return false;
 
     const dr = to.r - from.r;
     const dc = to.c - from.c;
     const absR = Math.abs(dr);
     const absC = Math.abs(dc);
 
-    const stepR = dr === 0 ? 0 : dr / absR;
-    const stepC = dc === 0 ? 0 : dc / absC;
-
     if (dr !== 0 && dc !== 0 && absR !== absC) return false;
 
-    // Small and Medium move max 2 spaces; Large moves 1 space
     const maxDist = (piece.size === 'S' || piece.size === 'M') ? 2 : 1;
     const dist = Math.max(absR, absC);
 
     if (dist < 1 || dist > maxDist) return false;
 
+    // Path check
+    const stepR = dr === 0 ? 0 : dr / absR;
+    const stepC = dc === 0 ? 0 : dc / absC;
     let currR = from.r + stepR;
     let currC = from.c + stepC;
     while (currR !== to.r || currC !== to.c) {
-        if (board[currR][currC] !== null) return false;
+        if (currentBoard[currR][currC] !== null) return false;
         currR += stepR;
         currC += stepC;
     }
@@ -204,4 +169,6 @@ function isValidMoveLocal(board, from, to, piece) {
     return true;
 }
 
-connect();
+function updateScores(scores) {
+    scoreElement.innerText = `Player 1: ${scores[1]} | Player 2: ${scores[2]}`;
+}
