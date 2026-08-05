@@ -55,6 +55,20 @@ socket.onmessage = (event) => {
     }
 };
 
+// A MOVE_MADE broadcast fires for BOTH players' moves. Previously this
+// unconditionally cleared the local selection, so if your opponent moved
+// while you had a piece selected, your selection was wiped out from under
+// you before you could click your destination — making it feel like your
+// moves were being ignored during fast opponent play. Only clear the
+// selection if it's no longer a piece you can legally act on.
+function clearSelectionIfInvalid() {
+    if (!selectedCell) return;
+    const p = currentBoard[selectedCell.r] ? currentBoard[selectedCell.r][selectedCell.c] : null;
+    if (!p || p.owner !== myPlayerNum || p.freeze > 0 || p.locked) {
+        selectedCell = null;
+    }
+}
+
 function animateAndSyncMove(from, to, newBoard, scores) {
     const fromCell = document.querySelector(`.cell[data-row="${from.r}"][data-col="${from.c}"]`);
     const toCell = document.querySelector(`.cell[data-row="${to.r}"][data-col="${to.c}"]`);
@@ -73,13 +87,13 @@ function animateAndSyncMove(from, to, newBoard, scores) {
 
         setTimeout(() => {
             currentBoard = newBoard;
-            selectedCell = null;
+            clearSelectionIfInvalid();
             if (scores) updateScores(scores);
             renderBoard();
         }, 200);
     } else {
         currentBoard = newBoard;
-        selectedCell = null;
+        clearSelectionIfInvalid();
         if (scores) updateScores(scores);
         renderBoard();
     }
