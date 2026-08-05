@@ -97,8 +97,9 @@ wss.on('connection', (ws) => {
             scores: { 1: 0, 2: 0 },
             p1Timer: null,
             p2Timer: null,
-            p1TimeLeft: 5,
-            p2TimeLeft: 5,
+            p1TimeLeft: 10,
+            p2TimeLeft: 10,
+            timersStarted: false,
             gameStarted: true,
             gameOver: false
         };
@@ -111,11 +112,8 @@ wss.on('connection', (ws) => {
         p1.send(JSON.stringify({ type: 'START', player: 1, board: room.board }));
         p2.send(JSON.stringify({ type: 'START', player: 2, board: room.board }));
 
-        // Start the 5-second move timer for BOTH players right away.
-        // Previously this only happened after a player's first move,
-        // so a player could stall forever before making one.
-        resetTimer(room, 1);
-        resetTimer(room, 2);
+        // Neither clock runs yet — both start together the moment either
+        // player makes their first move (see handleMove).
     }
 
     ws.on('message', (message) => {
@@ -161,6 +159,13 @@ function handleMove(room, playerNum, from, to) {
     if (!piece || piece.owner !== playerNum || piece.freeze > 0 || piece.locked) return;
 
     if (!isValidMove(room.board, from, to, piece)) return;
+
+    if (!room.timersStarted) {
+        // First move of the game — start BOTH clocks now, together.
+        room.timersStarted = true;
+        const otherNum = playerNum === 1 ? 2 : 1;
+        resetTimer(room, otherNum);
+    }
 
     // Reset inactivity timer for the player making the move
     resetTimer(room, playerNum);
@@ -275,11 +280,13 @@ function hasLegalMoves(board, playerNum) {
     return false;
 }
 
+const MOVE_TIME_LIMIT = 10;
+
 function resetTimer(room, playerNum) {
     if (playerNum === 1) {
         clearInterval(room.p1Timer);
-        room.p1TimeLeft = 5;
-        broadcast(room, { type: 'TIMER_UPDATE', player: 1, time: 5 });
+        room.p1TimeLeft = MOVE_TIME_LIMIT;
+        broadcast(room, { type: 'TIMER_UPDATE', player: 1, time: MOVE_TIME_LIMIT });
         room.p1Timer = setInterval(() => {
             room.p1TimeLeft--;
             broadcast(room, { type: 'TIMER_UPDATE', player: 1, time: room.p1TimeLeft });
@@ -289,8 +296,8 @@ function resetTimer(room, playerNum) {
         }, 1000);
     } else {
         clearInterval(room.p2Timer);
-        room.p2TimeLeft = 5;
-        broadcast(room, { type: 'TIMER_UPDATE', player: 2, time: 5 });
+        room.p2TimeLeft = MOVE_TIME_LIMIT;
+        broadcast(room, { type: 'TIMER_UPDATE', player: 2, time: MOVE_TIME_LIMIT });
         room.p2Timer = setInterval(() => {
             room.p2TimeLeft--;
             broadcast(room, { type: 'TIMER_UPDATE', player: 2, time: room.p2TimeLeft });
