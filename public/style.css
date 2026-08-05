@@ -38,25 +38,32 @@ body {
     min-height: 28px;
 }
 
-#info-bar {
+.score-board {
     display: flex;
     justify-content: space-between;
+    gap: 10px;
     width: 100%;
+    margin-bottom: 15px;
+}
+
+.player-card {
+    flex: 1;
     background-color: #1e1e1e;
     padding: 10px 15px;
     border-radius: 8px;
-    margin-bottom: 15px;
     font-size: 0.95rem;
     font-weight: bold;
+    text-align: center;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
 }
 
-#timer {
-    color: #ffcc00;
-}
+#p1-card { border-bottom: 3px solid #b71c1c; }
+#p2-card { border-bottom: 3px solid #0d47a1; }
 
-#score {
-    color: #ffffff;
+.timer {
+    color: #ffcc00;
+    font-size: 1.1rem;
+    margin: 4px 0;
 }
 
 /* 7x7 Grid Board */

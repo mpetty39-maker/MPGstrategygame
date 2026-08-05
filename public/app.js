@@ -5,8 +5,12 @@ let currentBoard = null;
 
 const boardElement = document.getElementById('board');
 const statusElement = document.getElementById('status');
-const timerElement = document.getElementById('timer');
-const scoreElement = document.getElementById('score');
+// index.html has separate per-player elements (there is no single
+// #timer/#score element), so grab both pairs instead.
+const p1TimerElement = document.getElementById('p1-timer');
+const p2TimerElement = document.getElementById('p2-timer');
+const p1ScoreElement = document.getElementById('p1-score');
+const p2ScoreElement = document.getElementById('p2-score');
 
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 socket = new WebSocket(`${protocol}//${window.location.host}`);
@@ -28,17 +32,14 @@ socket.onmessage = (event) => {
                 break;
 
             case 'MOVE_MADE':
-                currentBoard = data.board;
-                selectedCell = null;
-                if (data.scores) updateScores(data.scores);
-                renderBoard();
+                animateAndSyncMove(data.from, data.to, data.board, data.scores);
                 break;
 
-            case 'TIMER_UPDATE':
-                if (data.player === myPlayerNum) {
-                    timerElement.innerText = `Move Timer: ${data.time}s`;
-                }
+            case 'TIMER_UPDATE': {
+                const timerElement = data.player === 1 ? p1TimerElement : p2TimerElement;
+                if (timerElement) timerElement.innerText = `${data.time}s`;
                 break;
+            }
 
             case 'GAMEOVER':
                 statusElement.innerText = `GAME OVER: ${data.reason}`;
@@ -54,13 +55,43 @@ socket.onmessage = (event) => {
     }
 };
 
+function animateAndSyncMove(from, to, newBoard, scores) {
+    const fromCell = document.querySelector(`.cell[data-row="${from.r}"][data-col="${from.c}"]`);
+    const toCell = document.querySelector(`.cell[data-row="${to.r}"][data-col="${to.c}"]`);
+
+    if (fromCell && toCell && fromCell.firstElementChild) {
+        const pieceElem = fromCell.firstElementChild;
+        const fromRect = fromCell.getBoundingClientRect();
+        const toRect = toCell.getBoundingClientRect();
+
+        const deltaX = toRect.left - fromRect.left;
+        const deltaY = toRect.top - fromRect.top;
+
+        pieceElem.style.transition = 'transform 0.2s ease-out';
+        pieceElem.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+        pieceElem.style.zIndex = '100';
+
+        setTimeout(() => {
+            currentBoard = newBoard;
+            selectedCell = null;
+            if (scores) updateScores(scores);
+            renderBoard();
+        }, 200);
+    } else {
+        currentBoard = newBoard;
+        selectedCell = null;
+        if (scores) updateScores(scores);
+        renderBoard();
+    }
+}
+
 function renderBoard() {
     if (!currentBoard) return;
     boardElement.innerHTML = '';
 
     for (let displayR = 0; displayR < 7; displayR++) {
         for (let displayC = 0; displayC < 7; displayC++) {
-            // Map coordinates so Player 2 baseline is on bottom
+            // Map screen coordinates per player so baseline is at the bottom
             const r = myPlayerNum === 2 ? (6 - displayR) : displayR;
             const c = myPlayerNum === 2 ? (6 - displayC) : displayC;
 
@@ -74,12 +105,12 @@ function renderBoard() {
                 cell.classList.add('selected');
             }
 
-            // Highlight legal target squares
+            // Check if this cell is a valid move destination for the selected piece
             if (selectedCell && isValidMoveDestination(selectedCell, { r, c })) {
                 cell.classList.add('valid-target');
             }
 
-            // Render piece on top of square
+            // Render piece if one exists on this cell
             const piece = currentBoard[r] ? currentBoard[r][c] : null;
             if (piece) {
                 const pieceDiv = document.createElement('div');
@@ -99,7 +130,6 @@ function renderBoard() {
                 cell.appendChild(pieceDiv);
             }
 
-            // Single unified click handler
             cell.addEventListener('click', () => handleCellClick(r, c));
             boardElement.appendChild(cell);
         }
@@ -110,10 +140,10 @@ function handleCellClick(r, c) {
     if (!currentBoard) return;
     const clickedPiece = currentBoard[r] ? currentBoard[r][c] : null;
 
-    // Case 1: Tapping your own unfrozen piece -> SELECT IT
+    // Case 1: Tapping your own active, unfrozen piece -> SELECT IT
     if (clickedPiece && clickedPiece.owner === myPlayerNum && clickedPiece.freeze === 0 && !clickedPiece.locked) {
         if (selectedCell && selectedCell.r === r && selectedCell.c === c) {
-            selectedCell = null; // Toggle off if clicked again
+            selectedCell = null; // Toggle off if tapped again
         } else {
             selectedCell = { r, c };
         }
@@ -121,11 +151,12 @@ function handleCellClick(r, c) {
         return;
     }
 
-    // Case 2: Tapping a target square while a piece is selected -> EXECUTE MOVE
+    // Case 2: Tapping a square (empty or opponent) while a piece is selected -> ATTEMPT MOVE
     if (selectedCell) {
         const from = selectedCell;
         const to = { r, c };
 
+        // Only send if it's a valid move
         if (isValidMoveDestination(from, to)) {
             socket.send(JSON.stringify({
                 type: 'MOVE',
@@ -141,6 +172,8 @@ function handleCellClick(r, c) {
 
 function isValidMoveDestination(from, to) {
     if (!currentBoard || !from || !to) return false;
+    
+    // Cannot move to the exact same square
     if (from.r === to.r && from.c === to.c) return false;
 
     const piece = currentBoard[from.r] ? currentBoard[from.r][from.c] : null;
@@ -148,10 +181,11 @@ function isValidMoveDestination(from, to) {
 
     const target = currentBoard[to.r] ? currentBoard[to.r][to.c] : null;
     
-    // Cannot land on locked pieces or your own pieces
+    // Cannot move onto locked pieces or your own pieces
     if (target && (target.locked || target.owner === piece.owner)) return false;
 
-    // Size check for captures: S=1, M=2, L=3. Cannot capture larger pieces
+    // Size hierarchy check for captures: Small (1) < Medium (2) < Large (3)
+    // You CANNOT capture a piece bigger than yourself
     const sizeRank = { 'S': 1, 'M': 2, 'L': 3 };
     if (target && sizeRank[piece.size] < sizeRank[target.size]) return false;
 
@@ -160,16 +194,16 @@ function isValidMoveDestination(from, to) {
     const absR = Math.abs(dr);
     const absC = Math.abs(dc);
 
-    // Straight line required (orthogonal or 45-degree diagonal)
+    // Must move in a straight line (orthogonal or 45-degree diagonal)
     if (dr !== 0 && dc !== 0 && absR !== absC) return false;
 
-    // Small = max 2, Medium = max 2, Large = max 1
+    // Range rules: Small = max 2, Medium = max 2, Large = max 1
     const maxDist = (piece.size === 'S' || piece.size === 'M') ? 2 : 1;
     const dist = Math.max(absR, absC);
 
     if (dist < 1 || dist > maxDist) return false;
 
-    // Check line-of-sight for obstructions
+    // Path obstruction check (cannot jump through intermediate pieces)
     const stepR = dr === 0 ? 0 : dr / absR;
     const stepC = dc === 0 ? 0 : dc / absC;
     let currR = from.r + stepR;
@@ -185,7 +219,7 @@ function isValidMoveDestination(from, to) {
 }
 
 function updateScores(scores) {
-    if (scores && scoreElement) {
-        scoreElement.innerText = `Player 1: ${scores[1]} | Player 2: ${scores[2]}`;
-    }
+    if (!scores) return;
+    if (p1ScoreElement) p1ScoreElement.innerText = scores[1];
+    if (p2ScoreElement) p2ScoreElement.innerText = scores[2];
 }
