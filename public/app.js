@@ -91,9 +91,13 @@ function renderBoard() {
 
     for (let displayR = 0; displayR < 7; displayR++) {
         for (let displayC = 0; displayC < 7; displayC++) {
-            // Map screen coordinates per player so baseline is at the bottom
-            const r = myPlayerNum === 2 ? (6 - displayR) : displayR;
-            const c = myPlayerNum === 2 ? (6 - displayC) : displayC;
+            // Map screen coordinates so each player's OWN pieces are
+            // anchored at the bottom of their own screen. Player 1's
+            // home rows are 0-1 (need a 180-degree flip to land at the
+            // bottom); Player 2's home rows are 5-6 (already at the
+            // bottom with no flip needed).
+            const r = myPlayerNum === 1 ? (6 - displayR) : displayR;
+            const c = myPlayerNum === 1 ? (6 - displayC) : displayC;
 
             const cell = document.createElement('div');
             cell.classList.add('cell');
