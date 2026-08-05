@@ -28,7 +28,10 @@ socket.onmessage = (event) => {
                 break;
 
             case 'MOVE_MADE':
-                animateAndSyncMove(data.from, data.to, data.board, data.scores);
+                currentBoard = data.board;
+                selectedCell = null;
+                if (data.scores) updateScores(data.scores);
+                renderBoard();
                 break;
 
             case 'TIMER_UPDATE':
@@ -51,45 +54,13 @@ socket.onmessage = (event) => {
     }
 };
 
-function animateAndSyncMove(from, to, newBoard, scores) {
-    const fromCell = document.querySelector(`.cell[data-row="${from.r}"][data-col="${from.c}"]`);
-    const toCell = document.querySelector(`.cell[data-row="${to.r}"][data-col="${to.c}"]`);
-
-    if (fromCell && toCell && fromCell.firstElementChild) {
-        const pieceElem = fromCell.firstElementChild;
-        const fromRect = fromCell.getBoundingClientRect();
-        const toRect = toCell.getBoundingClientRect();
-
-        const deltaX = toRect.left - fromRect.left;
-        const deltaY = toRect.top - fromRect.top;
-
-        // Perform standard screen-space slide animation
-        pieceElem.style.transition = 'transform 0.2s ease-out';
-        pieceElem.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
-        pieceElem.style.zIndex = '100';
-
-        setTimeout(() => {
-            currentBoard = newBoard;
-            selectedCell = null;
-            if (scores) updateScores(scores);
-            renderBoard();
-        }, 200);
-    } else {
-        currentBoard = newBoard;
-        selectedCell = null;
-        if (scores) updateScores(scores);
-        renderBoard();
-    }
-}
-
 function renderBoard() {
     if (!currentBoard) return;
     boardElement.innerHTML = '';
 
     for (let displayR = 0; displayR < 7; displayR++) {
         for (let displayC = 0; displayC < 7; displayC++) {
-            // Map screen position to logical board row/col
-            // Player 2 sees row 6 at the bottom (displayR = 6 maps to board row 6)
+            // Map coordinates so Player 2 baseline is on bottom
             const r = myPlayerNum === 2 ? (6 - displayR) : displayR;
             const c = myPlayerNum === 2 ? (6 - displayC) : displayC;
 
@@ -98,10 +69,17 @@ function renderBoard() {
             cell.dataset.row = r;
             cell.dataset.col = c;
 
+            // Highlight selected cell
             if (selectedCell && selectedCell.r === r && selectedCell.c === c) {
                 cell.classList.add('selected');
             }
 
+            // Highlight legal target squares
+            if (selectedCell && isValidMoveDestination(selectedCell, { r, c })) {
+                cell.classList.add('valid-target');
+            }
+
+            // Render piece on top of square
             const piece = currentBoard[r] ? currentBoard[r][c] : null;
             if (piece) {
                 const pieceDiv = document.createElement('div');
@@ -121,10 +99,7 @@ function renderBoard() {
                 cell.appendChild(pieceDiv);
             }
 
-            if (selectedCell && isValidMoveDestination(selectedCell, { r, c })) {
-                cell.classList.add('valid-target');
-            }
-
+            // Single unified click handler
             cell.addEventListener('click', () => handleCellClick(r, c));
             boardElement.appendChild(cell);
         }
@@ -135,10 +110,10 @@ function handleCellClick(r, c) {
     if (!currentBoard) return;
     const clickedPiece = currentBoard[r] ? currentBoard[r][c] : null;
 
-    // Select active piece belonging to current player
+    // Case 1: Tapping your own unfrozen piece -> SELECT IT
     if (clickedPiece && clickedPiece.owner === myPlayerNum && clickedPiece.freeze === 0 && !clickedPiece.locked) {
         if (selectedCell && selectedCell.r === r && selectedCell.c === c) {
-            selectedCell = null;
+            selectedCell = null; // Toggle off if clicked again
         } else {
             selectedCell = { r, c };
         }
@@ -146,16 +121,18 @@ function handleCellClick(r, c) {
         return;
     }
 
-    // Try to move selected piece to clicked square
+    // Case 2: Tapping a target square while a piece is selected -> EXECUTE MOVE
     if (selectedCell) {
         const from = selectedCell;
         const to = { r, c };
 
-        socket.send(JSON.stringify({
-            type: 'MOVE',
-            from: from,
-            to: to
-        }));
+        if (isValidMoveDestination(from, to)) {
+            socket.send(JSON.stringify({
+                type: 'MOVE',
+                from: from,
+                to: to
+            }));
+        }
 
         selectedCell = null;
         renderBoard();
@@ -164,29 +141,35 @@ function handleCellClick(r, c) {
 
 function isValidMoveDestination(from, to) {
     if (!currentBoard || !from || !to) return false;
+    if (from.r === to.r && from.c === to.c) return false;
+
     const piece = currentBoard[from.r] ? currentBoard[from.r][from.c] : null;
     if (!piece || piece.owner !== myPlayerNum || piece.freeze > 0 || piece.locked) return false;
 
     const target = currentBoard[to.r] ? currentBoard[to.r][to.c] : null;
-    if (target && target.locked) return false;
-    if (target && target.owner === piece.owner) return false;
+    
+    // Cannot land on locked pieces or your own pieces
+    if (target && (target.locked || target.owner === piece.owner)) return false;
 
+    // Size check for captures: S=1, M=2, L=3. Cannot capture larger pieces
     const sizeRank = { 'S': 1, 'M': 2, 'L': 3 };
-    if (target && sizeRank[piece.size] < sizeRank(target.size)) return false;
+    if (target && sizeRank[piece.size] < sizeRank[target.size]) return false;
 
     const dr = to.r - from.r;
     const dc = to.c - from.c;
     const absR = Math.abs(dr);
     const absC = Math.abs(dc);
 
+    // Straight line required (orthogonal or 45-degree diagonal)
     if (dr !== 0 && dc !== 0 && absR !== absC) return false;
 
-    // Small = max 3, Medium = max 2, Large = max 1
-    const maxDist = piece.size === 'S' ? 3 : (piece.size === 'M' ? 2 : 1);
+    // Small = max 2, Medium = max 2, Large = max 1
+    const maxDist = (piece.size === 'S' || piece.size === 'M') ? 2 : 1;
     const dist = Math.max(absR, absC);
 
     if (dist < 1 || dist > maxDist) return false;
 
+    // Check line-of-sight for obstructions
     const stepR = dr === 0 ? 0 : dr / absR;
     const stepC = dc === 0 ? 0 : dc / absC;
     let currR = from.r + stepR;
