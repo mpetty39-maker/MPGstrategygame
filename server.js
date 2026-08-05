@@ -10,206 +10,241 @@ const wss = new WebSocket.Server({ server });
 app.use(express.static(path.join(__dirname, 'public')));
 
 let waitingPlayer = null;
-let games = {};
+let rooms = {};
+let roomIdCounter = 1;
 
+// Board setup: Player 1 (top, index 0) vs Player 2 (bottom, index 6)
+// Size: 'S' (Small), 'M' (Medium), 'L' (Large)
 function createInitialBoard() {
-    // 7x7 grid
-    // Row 0: Player 1 (Top) -> M, M, L, L, L, M, M
-    // Row 1: Player 1 -> empty, S, S, S, S, S, empty
-    // Row 5: Player 2 -> empty, S, S, S, S, S, empty
-    // Row 6: Player 2 (Bottom) -> M, M, L, L, L, M, M
     let board = Array(7).fill(null).map(() => Array(7).fill(null));
+    
+    // Player 1 (Top, row 0 & 1)
+    board[0] = [
+        { owner: 1, size: 'M', freeze: 0, locked: false },
+        { owner: 1, size: 'M', freeze: 0, locked: false },
+        { owner: 1, size: 'L', freeze: 0, locked: false },
+        { owner: 1, size: 'L', freeze: 0, locked: false },
+        { owner: 1, size: 'L', freeze: 0, locked: false },
+        { owner: 1, size: 'M', freeze: 0, locked: false },
+        { owner: 1, size: 'M', freeze: 0, locked: false }
+    ];
+    board[1] = [
+        null,
+        { owner: 1, size: 'S', freeze: 0, locked: false },
+        { owner: 1, size: 'S', freeze: 0, locked: false },
+        { owner: 1, size: 'S', freeze: 0, locked: false },
+        { owner: 1, size: 'S', freeze: 0, locked: false },
+        { owner: 1, size: 'S', freeze: 0, locked: false },
+        null
+    ];
 
-    // Player 1 setup
-    board[0][0] = { owner: 1, size: 'M', freeze: 0, locked: false };
-    board[0][1] = { owner: 1, size: 'M', freeze: 0, locked: false };
-    board[0][2] = { owner: 1, size: 'L', freeze: 0, locked: false };
-    board[0][3] = { owner: 1, size: 'L', freeze: 0, locked: false };
-    board[0][4] = { owner: 1, size: 'L', freeze: 0, locked: false };
-    board[0][5] = { owner: 1, size: 'M', freeze: 0, locked: false };
-    board[0][6] = { owner: 1, size: 'M', freeze: 0, locked: false };
-
-    for (let c = 1; c <= 5; c++) {
-        board[1][c] = { owner: 1, size: 'S', freeze: 0, locked: false };
-    }
-
-    // Player 2 setup
-    for (let c = 1; c <= 5; c++) {
-        board[5][c] = { owner: 2, size: 'S', freeze: 0, locked: false };
-    }
-
-    board[6][0] = { owner: 2, size: 'M', freeze: 0, locked: false };
-    board[6][1] = { owner: 2, size: 'M', freeze: 0, locked: false };
-    board[6][2] = { owner: 2, size: 'L', freeze: 0, locked: false };
-    board[6][3] = { owner: 2, size: 'L', freeze: 0, locked: false };
-    board[6][4] = { owner: 2, size: 'L', freeze: 0, locked: false };
-    board[6][5] = { owner: 2, size: 'M', freeze: 0, locked: false };
-    board[6][6] = { owner: 2, size: 'M', freeze: 0, locked: false };
+    // Player 2 (Bottom, row 5 & 6)
+    board[5] = [
+        null,
+        { owner: 2, size: 'S', freeze: 0, locked: false },
+        { owner: 2, size: 'S', freeze: 0, locked: false },
+        { owner: 2, size: 'S', freeze: 0, locked: false },
+        { owner: 2, size: 'S', freeze: 0, locked: false },
+        { owner: 2, size: 'S', freeze: 0, locked: false },
+        null
+    ];
+    board[6] = [
+        { owner: 2, size: 'M', freeze: 0, locked: false },
+        { owner: 2, size: 'M', freeze: 0, locked: false },
+        { owner: 2, size: 'L', freeze: 0, locked: false },
+        { owner: 2, size: 'L', freeze: 0, locked: false },
+        { owner: 2, size: 'L', freeze: 0, locked: false },
+        { owner: 2, size: 'M', freeze: 0, locked: false },
+        { owner: 2, size: 'M', freeze: 0, locked: false }
+    ];
 
     return board;
+}
+
+const FREEZE_TIME = { 'S': 1, 'M': 2, 'L': 3 };
+
+// A move message from the client is untrusted input — always validate
+// that r/c are actual integers within the 7x7 board before touching
+// room.board[r][c], otherwise a malformed/out-of-range value crashes
+// the whole process (and both players' games with it).
+function isValidPosition(pos) {
+    return (
+        pos &&
+        Number.isInteger(pos.r) &&
+        Number.isInteger(pos.c) &&
+        pos.r >= 0 && pos.r < 7 &&
+        pos.c >= 0 && pos.c < 7
+    );
 }
 
 wss.on('connection', (ws) => {
     if (!waitingPlayer) {
         waitingPlayer = ws;
+        ws.playerNum = 1;
         ws.send(JSON.stringify({ type: 'WAITING', message: 'Waiting for an opponent...' }));
     } else {
-        const gameId = Date.now().toString();
-        const player1 = waitingPlayer;
-        const player2 = ws;
+        const roomId = 'room_' + roomIdCounter++;
+        const p1 = waitingPlayer;
+        const p2 = ws;
+        p2.playerNum = 2;
         waitingPlayer = null;
 
-        const gameState = {
-            id: gameId,
-            p1: player1,
-            p2: player2,
+        const room = {
+            id: roomId,
+            p1: p1,
+            p2: p2,
             board: createInitialBoard(),
             scores: { 1: 0, 2: 0 },
-            timers: { 1: 5, 2: 5 },
-            timerInterval: null
+            p1Timer: null,
+            p2Timer: null,
+            p1TimeLeft: 5,
+            p2TimeLeft: 5,
+            gameStarted: true,
+            gameOver: false
         };
 
-        games[gameId] = gameState;
-        player1.gameId = gameId;
-        player1.playerNum = 1;
-        player2.gameId = gameId;
-        player2.playerNum = 2;
+        p1.room = room;
+        p2.room = room;
 
-        player1.send(JSON.stringify({ type: 'START', player: 1, board: gameState.board }));
-        player2.send(JSON.stringify({ type: 'START', player: 2, board: gameState.board }));
+        rooms[roomId] = room;
 
-        startInactivityTimer(gameState);
+        p1.send(JSON.stringify({ type: 'START', player: 1, board: room.board }));
+        p2.send(JSON.stringify({ type: 'START', player: 2, board: room.board }));
+
+        // Start the 5-second move timer for BOTH players right away.
+        // Previously this only happened after a player's first move,
+        // so a player could stall forever before making one.
+        resetTimer(room, 1);
+        resetTimer(room, 2);
     }
 
     ws.on('message', (message) => {
+        let data;
         try {
-            const data = JSON.parse(message);
-            const game = games[ws.gameId];
-            if (!game) return;
+            data = JSON.parse(message);
+        } catch (err) {
+            // Malformed JSON from a client should never take the server down.
+            return;
+        }
 
-            if (data.type === 'MOVE') {
-                handleMove(game, ws.playerNum, data.from, data.to);
-            }
-        } catch (e) {
-            console.error("Server error handling message:", e);
+        const room = ws.room;
+        if (!room || room.gameOver) return;
+
+        if (data.type === 'MOVE') {
+            if (!isValidPosition(data.from) || !isValidPosition(data.to)) return;
+            handleMove(room, ws.playerNum, data.from, data.to);
         }
     });
 
+    ws.on('error', () => {
+        // Swallow socket errors instead of letting them crash the process;
+        // the eventual 'close' event still handles cleanup for this player.
+    });
+
     ws.on('close', () => {
-        if (waitingPlayer === ws) {
-            waitingPlayer = null;
-        }
-        if (ws.gameId && games[ws.gameId]) {
-            const game = games[ws.gameId];
-            clearInterval(game.timerInterval);
-            const opponent = ws.playerNum === 1 ? game.p2 : game.p1;
-            if (opponent && opponent.readyState === WebSocket.OPEN) {
-                opponent.send(JSON.stringify({ type: 'GAMEOVER', reason: 'Opponent disconnected.', winner: opponent.playerNum }));
+        if (waitingPlayer === ws) waitingPlayer = null;
+        if (ws.room) {
+            const room = ws.room;
+            room.gameOver = true;
+            stopTimers(room);
+            const other = ws.playerNum === 1 ? room.p2 : room.p1;
+            if (other && other.readyState === WebSocket.OPEN) {
+                other.send(JSON.stringify({ type: 'GAMEOVER', reason: 'Opponent disconnected!', winner: other.playerNum }));
             }
-            delete games[ws.gameId];
+            delete rooms[room.id];
         }
     });
 });
 
-function handleMove(game, playerNum, from, to) {
-    const board = game.board;
-    const piece = board[from.r] ? board[from.r][from.c] : null;
+function handleMove(room, playerNum, from, to) {
+    const piece = room.board[from.r][from.c];
+    if (!piece || piece.owner !== playerNum || piece.freeze > 0 || piece.locked) return;
 
-    if (!piece || piece.owner !== playerNum || piece.freeze > 0 || piece.locked) {
-        return; // Invalid player or frozen
-    }
+    if (!isValidMove(room.board, from, to, piece)) return;
 
-    if (!isValidMoveServer(board, playerNum, from, to)) {
-        return; // Failed path/range/capture check
-    }
+    // Reset inactivity timer for the player making the move
+    resetTimer(room, playerNum);
 
-    // Process move
-    board[to.r][to.c] = piece;
-    board[from.r][from.c] = null;
+    // Perform capture / movement logic
+    const target = room.board[to.r][to.c];
+    room.board[from.r][from.c] = null;
+    room.board[to.r][to.c] = piece;
 
-    // Set freeze timer for moved piece: S=1, M=2, L=3
-    const freezeDuration = piece.size === 'S' ? 1 : (piece.size === 'M' ? 2 : 3);
-    piece.freeze = freezeDuration + 1; // +1 because decrement loop runs immediately
-
-    // Decrement freeze counters for all player's pieces
+    // Update freeze state for ALL player pieces
     for (let r = 0; r < 7; r++) {
         for (let c = 0; c < 7; c++) {
-            const p = board[r][c];
-            if (p && p.owner === playerNum && p.freeze > 0) {
-                p.freeze--;
+            let p = room.board[r][c];
+            if (p && p.owner === playerNum) {
+                if (p === piece) {
+                    p.freeze = FREEZE_TIME[p.size];
+                } else if (p.freeze > 0) {
+                    p.freeze -= 1;
+                }
             }
         }
     }
 
-    // Check back row scoring (Player 1 back row = 6, Player 2 back row = 0)
-    const backRow = playerNum === 1 ? 6 : 0;
-    if (to.r === backRow && !piece.locked) {
+    // Check back row locking condition
+    const opponentBackRow = playerNum === 1 ? 6 : 0;
+    if (to.r === opponentBackRow && !piece.locked) {
         piece.locked = true;
-        game.scores[playerNum]++;
+        piece.freeze = 0; // Locked pieces don't need freeze indicators
+        room.scores[playerNum] += 1;
     }
 
-    // Reset move timer for player
-    game.timers[playerNum] = 5;
-
-    // Check win conditions
-    let gameOver = false;
-    let winner = null;
-    let reason = '';
-
-    if (game.scores[playerNum] >= 3) {
-        gameOver = true;
-        winner = playerNum;
-        reason = `Player ${playerNum} reached the back row with 3 pieces!`;
-    }
-
-    const payload = JSON.stringify({
+    // Broadcast move to both players
+    broadcast(room, {
         type: 'MOVE_MADE',
         from: from,
         to: to,
-        board: board,
-        scores: game.scores
+        board: room.board,
+        scores: room.scores
     });
 
-    game.p1.send(payload);
-    game.p2.send(payload);
+    // Check Win Conditions
+    if (room.scores[playerNum] >= 3) {
+        endGame(room, playerNum, `Player ${playerNum} reached 3 pieces on opponent's back row!`);
+        return;
+    }
 
-    if (gameOver) {
-        clearInterval(game.timerInterval);
-        const gameoverPayload = JSON.stringify({ type: 'GAMEOVER', reason: reason, winner: winner });
-        game.p1.send(gameoverPayload);
-        game.p2.send(gameoverPayload);
+    // Check if opponent can move or if all their pieces are frozen/captured
+    const oppNum = playerNum === 1 ? 2 : 1;
+    if (!hasLegalMoves(room.board, oppNum)) {
+        endGame(room, playerNum, `Player ${oppNum} has no legal moves available!`);
+        return;
     }
 }
 
-function isValidMoveServer(board, playerNum, from, to) {
-    if (from.r === to.r && from.c === to.c) return false;
+function sizeRank(size) {
+    return { 'S': 1, 'M': 2, 'L': 3 }[size];
+}
 
-    const piece = board[from.r][from.c];
+function isValidMove(board, from, to, piece) {
     const target = board[to.r][to.c];
-
-    if (target && (target.locked || target.owner === playerNum)) return false;
-
-    const sizeRank = { 'S': 1, 'M': 2, 'L': 3 };
-    if (target && sizeRank[piece.size] < sizeRank[target.size]) return false;
+    if (target && target.locked) return false; // Locked spaces cannot be captured
+    if (target && target.owner === piece.owner) return false;
+    if (target && sizeRank(piece.size) < sizeRank(target.size)) return false; // Cannot capture larger piece
 
     const dr = to.r - from.r;
     const dc = to.c - from.c;
     const absR = Math.abs(dr);
     const absC = Math.abs(dc);
 
+    // Direction must be straight or diagonal line
+    const stepR = dr === 0 ? 0 : dr / absR;
+    const stepC = dc === 0 ? 0 : dc / absC;
+
     if (dr !== 0 && dc !== 0 && absR !== absC) return false;
 
-    // Strict Max Dist: S=2, M=2, L=1
+    // Small and Medium move max 2 spaces; Large moves 1 space
     const maxDist = (piece.size === 'S' || piece.size === 'M') ? 2 : 1;
     const dist = Math.max(absR, absC);
 
     if (dist < 1 || dist > maxDist) return false;
 
-    const stepR = dr === 0 ? 0 : dr / absR;
-    const stepC = dc === 0 ? 0 : dc / absC;
+    // Path obstruction checking (cannot pass through any piece)
     let currR = from.r + stepR;
     let currC = from.c + stepC;
-
     while (currR !== to.r || currC !== to.c) {
         if (board[currR][currC] !== null) return false;
         currR += stepR;
@@ -219,32 +254,72 @@ function isValidMoveServer(board, playerNum, from, to) {
     return true;
 }
 
-function startInactivityTimer(game) {
-    game.timerInterval = setInterval(() => {
-        for (let p of [1, 2]) {
-            game.timers[p]--;
-            const ws = p === 1 ? game.p1 : game.p2;
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'TIMER_UPDATE', player: p, time: game.timers[p] }));
-            }
-
-            if (game.timers[p] <= 0) {
-                clearInterval(game.timerInterval);
-                const winner = p === 1 ? 2 : 1;
-                const gameoverPayload = JSON.stringify({
-                    type: 'GAMEOVER',
-                    reason: `Player ${p} ran out of time!`,
-                    winner: winner
-                });
-                game.p1.send(gameoverPayload);
-                game.p2.send(gameoverPayload);
-                return;
+function hasLegalMoves(board, playerNum) {
+    let hasPieces = false;
+    for (let r = 0; r < 7; r++) {
+        for (let c = 0; c < 7; c++) {
+            let p = board[r][c];
+            if (p && p.owner === playerNum && !p.locked) {
+                hasPieces = true;
+                if (p.freeze === 0) {
+                    // Check if at least one valid destination exists
+                    for (let tr = 0; tr < 7; tr++) {
+                        for (let tc = 0; tc < 7; tc++) {
+                            if (isValidMove(board, { r, c }, { r: tr, c: tc }, p)) return true;
+                        }
+                    }
+                }
             }
         }
-    }, 1000);
+    }
+    return false;
+}
+
+function resetTimer(room, playerNum) {
+    if (playerNum === 1) {
+        clearInterval(room.p1Timer);
+        room.p1TimeLeft = 5;
+        broadcast(room, { type: 'TIMER_UPDATE', player: 1, time: 5 });
+        room.p1Timer = setInterval(() => {
+            room.p1TimeLeft--;
+            broadcast(room, { type: 'TIMER_UPDATE', player: 1, time: room.p1TimeLeft });
+            if (room.p1TimeLeft <= 0) {
+                endGame(room, 2, 'Player 1 ran out of time!');
+            }
+        }, 1000);
+    } else {
+        clearInterval(room.p2Timer);
+        room.p2TimeLeft = 5;
+        broadcast(room, { type: 'TIMER_UPDATE', player: 2, time: 5 });
+        room.p2Timer = setInterval(() => {
+            room.p2TimeLeft--;
+            broadcast(room, { type: 'TIMER_UPDATE', player: 2, time: room.p2TimeLeft });
+            if (room.p2TimeLeft <= 0) {
+                endGame(room, 1, 'Player 2 ran out of time!');
+            }
+        }, 1000);
+    }
+}
+
+function stopTimers(room) {
+    clearInterval(room.p1Timer);
+    clearInterval(room.p2Timer);
+}
+
+function endGame(room, winner, reason) {
+    room.gameOver = true;
+    stopTimers(room);
+    broadcast(room, { type: 'GAMEOVER', winner: winner, reason: reason });
+    // Previously only cleaned up on disconnect, so rooms that ended via
+    // a normal win/timeout condition were leaked forever.
+    delete rooms[room.id];
+}
+
+function broadcast(room, msg) {
+    const payload = JSON.stringify(msg);
+    if (room.p1 && room.p1.readyState === WebSocket.OPEN) room.p1.send(payload);
+    if (room.p2 && room.p2.readyState === WebSocket.OPEN) room.p2.send(payload);
 }
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`Server listening on port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
