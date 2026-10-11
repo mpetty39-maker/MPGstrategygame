@@ -99,8 +99,11 @@ wss.on('connection', (ws) => {
             p2Timer: null,
             p1TimeLeft: 10,
             p2TimeLeft: 10,
-            timersStarted: false,
-            gameStarted: true,
+            // 'lobby'     -> both connected, waiting for Player 1 to press Start
+            // 'countdown' -> 3, 2, 1, Go! is running; moves are rejected
+            // 'playing'   -> clocks are running and moves are accepted
+            phase: 'lobby',
+            countdownTimer: null,
             gameOver: false
         };
 
@@ -109,11 +112,10 @@ wss.on('connection', (ws) => {
 
         rooms[roomId] = room;
 
-        p1.send(JSON.stringify({ type: 'START', player: 1, board: room.board }));
-        p2.send(JSON.stringify({ type: 'START', player: 2, board: room.board }));
-
-        // Neither clock runs yet — both start together the moment either
-        // player makes their first move (see handleMove).
+        // START now just means "you're paired up and here's the board".
+        // Nothing is live until Player 1 presses the Start button.
+        p1.send(JSON.stringify({ type: 'START', player: 1, board: room.board, phase: 'lobby' }));
+        p2.send(JSON.stringify({ type: 'START', player: 2, board: room.board, phase: 'lobby' }));
     }
 
     ws.on('message', (message) => {
@@ -128,7 +130,12 @@ wss.on('connection', (ws) => {
         const room = ws.room;
         if (!room || room.gameOver) return;
 
-        if (data.type === 'MOVE') {
+        if (data.type === 'BEGIN_COUNTDOWN') {
+            // Only Player 1 (first to connect) can start the game, and only once.
+            if (ws.playerNum === 1 && room.phase === 'lobby') {
+                startCountdown(room);
+            }
+        } else if (data.type === 'MOVE') {
             if (!isValidPosition(data.from) || !isValidPosition(data.to)) return;
             handleMove(room, ws.playerNum, data.from, data.to);
         }
@@ -154,18 +161,37 @@ wss.on('connection', (ws) => {
     });
 });
 
+// Broadcasts 3, 2, 1, then Go! one second apart. At "Go!" the phase flips
+// to 'playing' and BOTH clocks start at the same instant, whether or not
+// anyone has touched a piece yet.
+function startCountdown(room) {
+    room.phase = 'countdown';
+    let count = 3;
+    broadcast(room, { type: 'COUNTDOWN', value: count });
+
+    room.countdownTimer = setInterval(() => {
+        count--;
+        if (count > 0) {
+            broadcast(room, { type: 'COUNTDOWN', value: count });
+        } else {
+            clearInterval(room.countdownTimer);
+            room.countdownTimer = null;
+            room.phase = 'playing';
+            broadcast(room, { type: 'COUNTDOWN', value: 0 }); // 0 = "Go!"
+            resetTimer(room, 1);
+            resetTimer(room, 2);
+        }
+    }, 1000);
+}
+
 function handleMove(room, playerNum, from, to) {
+    // No moves during the lobby or the 3-2-1 countdown.
+    if (room.phase !== 'playing') return;
+
     const piece = room.board[from.r][from.c];
     if (!piece || piece.owner !== playerNum || piece.freeze > 0 || piece.locked) return;
 
     if (!isValidMove(room.board, from, to, piece)) return;
-
-    if (!room.timersStarted) {
-        // First move of the game — start BOTH clocks now, together.
-        room.timersStarted = true;
-        const otherNum = playerNum === 1 ? 2 : 1;
-        resetTimer(room, otherNum);
-    }
 
     // Reset inactivity timer for the player making the move
     resetTimer(room, playerNum);
@@ -311,6 +337,7 @@ function resetTimer(room, playerNum) {
 function stopTimers(room) {
     clearInterval(room.p1Timer);
     clearInterval(room.p2Timer);
+    clearInterval(room.countdownTimer);
 }
 
 function endGame(room, winner, reason) {
