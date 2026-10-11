@@ -11,6 +11,12 @@ const p1TimerElement = document.getElementById('p1-timer');
 const p2TimerElement = document.getElementById('p2-timer');
 const p1ScoreElement = document.getElementById('p1-score');
 const p2ScoreElement = document.getElementById('p2-score');
+const startButton = document.getElementById('start-btn');
+const countdownOverlay = document.getElementById('countdown-overlay');
+
+// Becomes true at "Go!" and false again at game over. Taps on the board are
+// ignored until then (the server enforces this too; this just keeps the UI honest).
+let gameLive = false;
 
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 socket = new WebSocket(`${protocol}//${window.location.host}`);
@@ -24,11 +30,25 @@ socket.onmessage = (event) => {
                 statusElement.innerText = data.message;
                 break;
 
-            case 'START':
+            case 'START': {
+                // Paired up, but nothing is live until Player 1 presses Start.
                 myPlayerNum = data.player;
                 currentBoard = data.board;
-                statusElement.innerText = `Game Started! You are Player ${myPlayerNum} (${myPlayerNum === 1 ? 'Red' : 'Blue'})`;
+                gameLive = false;
+                const colour = myPlayerNum === 1 ? 'Red' : 'Blue';
+                if (myPlayerNum === 1) {
+                    statusElement.innerText = `Opponent connected! You are Player 1 (${colour}). Press Start when ready.`;
+                    startButton.hidden = false;
+                } else {
+                    statusElement.innerText = `You are Player 2 (${colour}). Waiting for Player 1 to start...`;
+                }
                 renderBoard();
+                break;
+            }
+
+            case 'COUNTDOWN':
+                startButton.hidden = true;
+                showCountdown(data.value);
                 break;
 
             case 'MOVE_MADE':
@@ -42,6 +62,9 @@ socket.onmessage = (event) => {
             }
 
             case 'GAMEOVER':
+                gameLive = false;
+                startButton.hidden = true;
+                countdownOverlay.hidden = true;
                 statusElement.innerText = `GAME OVER: ${data.reason}`;
                 if (data.winner === myPlayerNum) {
                     statusElement.innerText += " YOU WIN!";
@@ -68,6 +91,38 @@ function clearSelectionIfInvalid() {
         selectedCell = null;
     }
 }
+
+let countdownHideTimeout = null;
+
+// value: 3, 2, 1 shows the number; 0 shows "Go!" and unlocks the board.
+function showCountdown(value) {
+    clearTimeout(countdownHideTimeout);
+    countdownOverlay.hidden = false;
+    countdownOverlay.classList.toggle('go', value === 0);
+
+    // Fresh element each tick so the pop animation replays.
+    const span = document.createElement('span');
+    span.className = 'count-num';
+    span.innerText = value === 0 ? 'Go!' : value;
+    countdownOverlay.innerHTML = '';
+    countdownOverlay.appendChild(span);
+
+    if (value > 0) {
+        statusElement.innerText = 'Get ready...';
+    } else {
+        gameLive = true;
+        statusElement.innerText = 'GO!';
+        // Leave "Go!" up briefly, then clear it so the board is visible.
+        countdownHideTimeout = setTimeout(() => {
+            countdownOverlay.hidden = true;
+        }, 700);
+    }
+}
+
+startButton.addEventListener('click', () => {
+    startButton.hidden = true; // prevent double-taps; server also ignores repeats
+    socket.send(JSON.stringify({ type: 'BEGIN_COUNTDOWN' }));
+});
 
 function animateAndSyncMove(from, to, newBoard, scores) {
     const fromCell = document.querySelector(`.cell[data-row="${from.r}"][data-col="${from.c}"]`);
@@ -155,7 +210,7 @@ function renderBoard() {
 }
 
 function handleCellClick(r, c) {
-    if (!currentBoard) return;
+    if (!currentBoard || !gameLive) return;
     const clickedPiece = currentBoard[r] ? currentBoard[r][c] : null;
 
     // Case 1: Tapping your own active, unfrozen piece -> SELECT IT

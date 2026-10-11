@@ -11,7 +11,10 @@
         <h1>Grid Tactics</h1>
         
         <div id="status">Connecting to server...</div>
-        
+
+        <!-- Shown only to Player 1 once an opponent has joined -->
+        <button id="start-btn" class="start-btn" hidden>Start Game</button>
+
         <div class="score-board">
             <div id="p1-card" class="player-card">
                 P1 (Red)
@@ -25,7 +28,12 @@
             </div>
         </div>
 
-        <div id="board" class="board"></div>
+        <!-- The overlay lives OUTSIDE #board because renderBoard() wipes
+             #board's contents on every update. -->
+        <div id="board-wrap" class="board-wrap">
+            <div id="board" class="board"></div>
+            <div id="countdown-overlay" class="countdown-overlay" hidden></div>
+        </div>
     </div>
 
     <script src="app.js"></script>
