@@ -18,6 +18,91 @@ const countdownOverlay = document.getElementById('countdown-overlay');
 // ignored until then (the server enforces this too; this just keeps the UI honest).
 let gameLive = false;
 
+// ---------------------------------------------------------------------------
+// Sound (Web Audio API — everything is synthesized, so there are no audio files)
+// ---------------------------------------------------------------------------
+// Browsers (especially iOS Safari) keep audio locked until the user touches the
+// page. Player 1 unlocks it by pressing Start; Player 2 unlocks it with their
+// first tap anywhere, so these listeners stay attached for the whole session.
+let audioCtx = null;
+
+function getAudioCtx() {
+    if (!audioCtx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return null;
+        audioCtx = new AC();
+    }
+    return audioCtx;
+}
+
+function unlockAudio() {
+    const ctx = getAudioCtx();
+    if (ctx && ctx.state === 'suspended') ctx.resume();
+}
+
+['pointerdown', 'touchend', 'click', 'keydown'].forEach((evt) => {
+    document.addEventListener(evt, unlockAudio, { passive: true });
+});
+
+// One soft tone with a quick fade in/out so it never clicks or pops.
+function playTone({ freq, endFreq, dur, vol, type = 'sine', delay = 0 }) {
+    const ctx = getAudioCtx();
+    if (!ctx || ctx.state !== 'running') return; // still locked: stay silent
+
+    const t0 = ctx.currentTime + delay;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t0);
+    if (endFreq) osc.frequency.exponentialRampToValueAtTime(endFreq, t0 + dur);
+
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.02);
+}
+
+const sounds = {
+    // Timer / countdown tick: short, quiet, soft sine blip.
+    tick: () => playTone({ freq: 740, dur: 0.08, vol: 0.07 }),
+    // "Go!": same family as the tick but higher and a little longer.
+    go: () => playTone({ freq: 1175, dur: 0.25, vol: 0.09 }),
+    // You captured a piece: bright rising two-note "ding-ding".
+    capture: () => {
+        playTone({ freq: 523, dur: 0.09, vol: 0.10, type: 'triangle' });
+        playTone({ freq: 784, dur: 0.16, vol: 0.10, type: 'triangle', delay: 0.08 });
+    },
+    // Your piece was captured: low falling "womp" so it's clearly different.
+    captured: () => playTone({ freq: 330, endFreq: 165, dur: 0.28, vol: 0.12, type: 'triangle' })
+};
+
+// Low-time warning beeps for YOUR timer only (the one you need to act on).
+// The server reports whole seconds, so:
+//   5s, 4s, 3s left -> one beep each (once per second)
+//   3s left onward  -> also a beep half a second later, giving beeps at
+//                      2.5, 2.0, 1.5, 1.0 and 0.5s (twice per second)
+let pendingHalfBeep = null;
+
+function cancelPendingBeep() {
+    clearTimeout(pendingHalfBeep);
+    pendingHalfBeep = null;
+}
+
+function handleTimerBeeps(secondsLeft) {
+    cancelPendingBeep(); // a fresh update (or a timer reset) supersedes the old plan
+    if (secondsLeft < 1 || secondsLeft > 5) return;
+
+    sounds.tick();
+    if (secondsLeft <= 3) {
+        pendingHalfBeep = setTimeout(sounds.tick, 500);
+    }
+}
+
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 socket = new WebSocket(`${protocol}//${window.location.host}`);
 
@@ -40,7 +125,7 @@ socket.onmessage = (event) => {
                     statusElement.innerText = `Opponent connected! You are Player 1 (${colour}). Press Start when ready.`;
                     startButton.hidden = false;
                 } else {
-                    statusElement.innerText = `You are Player 2 (${colour}). Waiting for Player 1 to start...`;
+                    statusElement.innerText = `You are Player 2 (${colour}). Waiting for Player 1 to start... (tap anywhere to enable sound)`;
                 }
                 renderBoard();
                 break;
@@ -52,16 +137,24 @@ socket.onmessage = (event) => {
                 break;
 
             case 'MOVE_MADE':
+                // The server says whether this move captured something and whose
+                // piece it was, so both players hear the right sound.
+                if (data.captured) {
+                    if (data.captured.owner === myPlayerNum) sounds.captured();
+                    else sounds.capture();
+                }
                 animateAndSyncMove(data.from, data.to, data.board, data.scores);
                 break;
 
             case 'TIMER_UPDATE': {
                 const timerElement = data.player === 1 ? p1TimerElement : p2TimerElement;
                 if (timerElement) timerElement.innerText = `${data.time}s`;
+                if (data.player === myPlayerNum) handleTimerBeeps(data.time);
                 break;
             }
 
             case 'GAMEOVER':
+                cancelPendingBeep();
                 gameLive = false;
                 startButton.hidden = true;
                 countdownOverlay.hidden = true;
@@ -108,8 +201,10 @@ function showCountdown(value) {
     countdownOverlay.appendChild(span);
 
     if (value > 0) {
+        sounds.tick(); // same soft beep as the low-time warning, once per second
         statusElement.innerText = 'Get ready...';
     } else {
+        sounds.go();
         gameLive = true;
         statusElement.innerText = 'GO!';
         // Leave "Go!" up briefly, then clear it so the board is visible.
