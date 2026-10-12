@@ -224,12 +224,15 @@ function handleMove(room, playerNum, from, to) {
     }
 
     // Broadcast move to both players
+    // `captured` lets clients play the right sound without having to guess
+    // from their own (possibly mid-animation) copy of the board.
     broadcast(room, {
         type: 'MOVE_MADE',
         from: from,
         to: to,
         board: room.board,
-        scores: room.scores
+        scores: room.scores,
+        captured: target ? { owner: target.owner, size: target.size } : null
     });
 
     // Check Win Conditions
